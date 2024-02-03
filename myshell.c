@@ -44,5 +44,26 @@ int process_arglist(int count, char **arglist)
     int hr = has_right_redirection(count, arglist);
     int hl = has_left_redirection(count, arglist);
 
+    if (ha)
+    {
+        /* code */
+    }
+    else if (pi != -1)
+    {
+        /* code */
+    }
+    else if (hr)
+    {
+        /* code */
+    }
+    else if (hl)
+    {
+        /* code */
+    }
+    else
+    {
+        /* code */
+    }
+
     return 0;
 }

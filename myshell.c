@@ -1,4 +1,8 @@
 #include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+
 #define STREQ(a, b) (strcmp((a), (b)) == 0)
 
 
@@ -7,6 +11,14 @@ int prepare(void)
 {
     return 0;
 }
+
+int finalize(void)
+{
+    printf("finalize\n");
+    return 0;
+}
+
+/* ~~~~~~~~~~~~~~~~ Classification ~~~~~~~~~~~~~~~~ */
 
 static int has_ampersand(int count, char **arglist)
 {
@@ -36,6 +48,32 @@ static int has_left_redirection(int count, char **arglist)
     return STREQ(arglist[count - 2], "<");
 }
 
+/* ~~~~~~~~~~~~~~~~~~~ Handling ~~~~~~~~~~~~~~~~~~~ */
+
+static void handle_default(int count, char **arglist)
+{
+    char *cmd = arglist[0];
+    int status;
+    pid_t pid = fork();
+    if (pid == -1) {
+        /* Handle fork failure */
+    }
+    if (pid == 0)
+    {
+        execvp(cmd, arglist);
+        /* If execvp returns, it must have failed */
+    }
+    else
+    {
+        waitpid(pid, &status, 0);
+        /* Handle child status */
+    }
+}
+
+// static void handle_ampersand(int count, char **arglist)
+// {
+
+// }
 
 int process_arglist(int count, char **arglist)
 {
@@ -62,8 +100,8 @@ int process_arglist(int count, char **arglist)
     }
     else
     {
-        /* code */
+        handle_default(count, arglist);
     }
 
-    return 0;
+    return 1;
 }

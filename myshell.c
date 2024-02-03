@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -14,14 +15,20 @@
 void mySignalHandler(int signum) {printf("an't stop me\n");}
 static pid_t* sons;
 static int num_of_sons;
-struct sigaction sa = {.sa_handler = mySignalHandler};
 
 int prepare(void)
 {
+    struct sigaction sa = {.sa_handler = mySignalHandler};
     if (sigaction(SIGINT, &sa, NULL) < 0) {
         perror("Signal handle registration failed\n");
         return 1;
     }
+    sons = (pid_t*)malloc(sizeof(pid_t));
+    if (sons == NULL) {
+        printf("prepare malloc failed: %s\n", strerror(errno));
+        return 1;
+    }
+    num_of_sons = 0;
     sons = (pid_t*)malloc(sizeof(pid_t));
     if (sons == NULL) {
         printf("prepare malloc failed: %s\n", strerror(errno));
@@ -33,6 +40,16 @@ int prepare(void)
 
 int finalize(void)
 {
+    int i;
+    int status;
+    printf("\nFinalize\n");
+    for (i = 0; i < num_of_sons; i++)
+    {
+        if (sons[i] > 0) {
+            waitpid(sons[i], &status, 0);
+        }
+    }
+    free(sons);
     int i;
     int status;
     printf("\nFinalize\n");
@@ -116,6 +133,22 @@ static pid_t handle_ampersand(int count, char **arglist)
     }
     return pid;
 }
+static pid_t handle_ampersand(int count, char **arglist)
+{
+    char *cmd = arglist[0];
+    pid_t pid;
+    arglist[count - 1] = NULL;
+    pid = fork();
+    if (pid == FORK_FAILURE) {
+        /* Handle fork failure */
+    }
+    if (pid == 0)
+    {
+        execvp(cmd, arglist);
+        /* If execvp returns, it must have failed */
+    }
+    return pid;
+}
 
 int process_arglist(int count, char **arglist)
 {
@@ -125,8 +158,20 @@ int process_arglist(int count, char **arglist)
     int hl = has_left_redirection(count, arglist);
     pid_t son;
 
+    pid_t son;
+
     if (ha)
     {
+        son = handle_ampersand(count, arglist);
+        printf("new son: %d\n", son);
+        num_of_sons++;
+        printf("num of sons: %d\n", num_of_sons);
+        sons = (pid_t*)realloc(sons, sizeof(pid_t) * num_of_sons);
+        if (sons == NULL) {
+            printf("sons realloc failed: %s\n", strerror(errno));
+            return 1;
+        }
+        sons[num_of_sons - 1] = son;
         son = handle_ampersand(count, arglist);
         printf("new son: %d\n", son);
         num_of_sons++;

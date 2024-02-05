@@ -14,10 +14,10 @@
 void mySignalHandler(int signum) {printf("an't stop me\n");}
 static pid_t* sons;
 static int num_of_sons;
+struct sigaction sa = {.sa_handler = mySignalHandler};
 
 int prepare(void)
 {
-    struct sigaction sa = {.sa_handler = mySignalHandler};
     if (sigaction(SIGINT, &sa, NULL) < 0) {
         perror("Signal handle registration failed\n");
         return 1;
@@ -153,5 +153,5 @@ int process_arglist(int count, char **arglist)
         handle_default(count, arglist);
     }
 
-    return 1;
+    return 0;
 }

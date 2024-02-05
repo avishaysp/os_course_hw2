@@ -50,16 +50,6 @@ int finalize(void)
         }
     }
     free(sons);
-    int i;
-    int status;
-    printf("\nFinalize\n");
-    for (i = 0; i < num_of_sons; i++)
-    {
-        if (sons[i] > 0) {
-            waitpid(sons[i], &status, 0);
-        }
-    }
-    free(sons);
     return 0;
 }
 
@@ -133,22 +123,6 @@ static pid_t handle_ampersand(int count, char **arglist)
     }
     return pid;
 }
-static pid_t handle_ampersand(int count, char **arglist)
-{
-    char *cmd = arglist[0];
-    pid_t pid;
-    arglist[count - 1] = NULL;
-    pid = fork();
-    if (pid == FORK_FAILURE) {
-        /* Handle fork failure */
-    }
-    if (pid == 0)
-    {
-        execvp(cmd, arglist);
-        /* If execvp returns, it must have failed */
-    }
-    return pid;
-}
 
 int process_arglist(int count, char **arglist)
 {
@@ -156,8 +130,6 @@ int process_arglist(int count, char **arglist)
     int pi = pipe_index(count, arglist);
     int hr = has_right_redirection(count, arglist);
     int hl = has_left_redirection(count, arglist);
-    pid_t son;
-
     pid_t son;
 
     if (ha)
@@ -169,7 +141,7 @@ int process_arglist(int count, char **arglist)
         sons = (pid_t*)realloc(sons, sizeof(pid_t) * num_of_sons);
         if (sons == NULL) {
             printf("sons realloc failed: %s\n", strerror(errno));
-            return 1;
+            return 0;
         }
         sons[num_of_sons - 1] = son;
         son = handle_ampersand(count, arglist);
@@ -179,7 +151,7 @@ int process_arglist(int count, char **arglist)
         sons = (pid_t*)realloc(sons, sizeof(pid_t) * num_of_sons);
         if (sons == NULL) {
             printf("sons realloc failed: %s\n", strerror(errno));
-            return 1;
+            return 0;
         }
         sons[num_of_sons - 1] = son;
     }
@@ -200,5 +172,5 @@ int process_arglist(int count, char **arglist)
         handle_default(count, arglist);
     }
 
-    return 0;
+    return 1;
 }

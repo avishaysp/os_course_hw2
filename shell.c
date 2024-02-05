@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#define DEBUG_PRINT(x) (printf("%d\n", x))
 
 // arglist - a list of char* arguments (words) provided by the user
 // it contains count+1 items, where the last item (arglist[count]) and *only* the last is NULL
@@ -17,7 +18,7 @@ int main(void)
 {
 	if (prepare() != 0)
 		exit(1);
-	
+
 	while (1)
 	{
 		char** arglist = NULL;
@@ -29,14 +30,13 @@ int main(void)
 			free(line);
 			break;
 		}
-    
+
 		arglist = (char**) malloc(sizeof(char*));
 		if (arglist == NULL) {
 			printf("malloc failed: %s\n", strerror(errno));
 			exit(1);
 		}
 		arglist[0] = strtok(line, " \t\n");
-    
 		while (arglist[count] != NULL) {
 			++count;
 			arglist = (char**) realloc(arglist, sizeof(char*) * (count + 1));
@@ -44,10 +44,9 @@ int main(void)
 				printf("realloc failed: %s\n", strerror(errno));
 				exit(1);
 			}
-      
+
 			arglist[count] = strtok(NULL, " \t\n");
 		}
-    
 		if (count != 0) {
 			if (!process_arglist(count, arglist)) {
 				free(line);
@@ -55,11 +54,11 @@ int main(void)
 				break;
 			}
 		}
-    
+
 		free(line);
 		free(arglist);
 	}
-	
+
 	if (finalize() != 0)
 		exit(1);
 

@@ -144,16 +144,6 @@ int process_arglist(int count, char **arglist)
             return 0;
         }
         sons[num_of_sons - 1] = son;
-        son = handle_ampersand(count, arglist);
-        printf("new son: %d\n", son);
-        num_of_sons++;
-        printf("num of sons: %d\n", num_of_sons);
-        sons = (pid_t*)realloc(sons, sizeof(pid_t) * num_of_sons);
-        if (sons == NULL) {
-            printf("sons realloc failed: %s\n", strerror(errno));
-            return 0;
-        }
-        sons[num_of_sons - 1] = son;
     }
     else if (pi != NOT_FOUND)
     {

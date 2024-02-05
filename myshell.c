@@ -9,7 +9,7 @@
 #define STREQ(a, b) (strcmp((a), (b)) == 0)
 #define FORK_FAILURE -1
 #define NOT_FOUND -1
-
+#define DEBUG_PRINT(x) (printf("%d\n", x))
 
 void mySignalHandler(int signum) {printf("an't stop me\n");}
 static pid_t* sons;
@@ -68,12 +68,12 @@ static int pipe_index(int count, char **arglist)
 
 static int has_right_redirection(int count, char **arglist)
 {
-    return STREQ(arglist[count - 2], ">");
+    return count > 2 ? STREQ(arglist[count - 2], ">") : 0;
 }
 
 static int has_left_redirection(int count, char **arglist)
 {
-    return STREQ(arglist[count - 2], "<");
+    return count > 2 ? STREQ(arglist[count - 2], "<") : 0;
 }
 
 /* ~~~~~~~~~~~~~~~~~~~ Handling ~~~~~~~~~~~~~~~~~~~ */
@@ -84,11 +84,13 @@ static void handle_default(int count, char **arglist)
     int status;
     pid_t pid = fork();
     if (pid == FORK_FAILURE) {
+        perror("fork failure\n");
         /* Handle fork failure */
     }
     if (pid == 0)
     {
         execvp(cmd, arglist);
+        perror("execvp failure\n");
         /* If execvp returns, it must have failed */
     }
     else

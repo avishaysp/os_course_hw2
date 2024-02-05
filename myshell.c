@@ -2,19 +2,28 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <stdio.h>
+#include <signal.h>
 
 #define STREQ(a, b) (strcmp((a), (b)) == 0)
+#define FORK_FAILURE -1
+#define NOT_FOUND -1
+#define DEBUG_PRINT(x) (printf("%d\n", x))
 
-
+void mySignalHandler(int signum) {}
 
 int prepare(void)
 {
+    struct sigaction newAction = {.sa_handler = mySignalHandler};
+    if (sigaction(SIGINT, &newAction, NULL) < 0) {
+        perror("Signal handle registration failed\n");
+        return 1;
+    }
     return 0;
 }
 
 int finalize(void)
 {
-    printf("finalize\n");
+    printf("\nfinalize\n");
     return 0;
 }
 
@@ -35,17 +44,17 @@ static int pipe_index(int count, char **arglist)
             return i;
         }
     }
-    return -1;
+    return NOT_FOUND;
 }
 
 static int has_right_redirection(int count, char **arglist)
 {
-    return STREQ(arglist[count - 2], ">");
+    return count > 2 ? STREQ(arglist[count - 2], ">") : 0;
 }
 
 static int has_left_redirection(int count, char **arglist)
 {
-    return STREQ(arglist[count - 2], "<");
+    return count > 2 ? STREQ(arglist[count - 2], "<") : 0;
 }
 
 /* ~~~~~~~~~~~~~~~~~~~ Handling ~~~~~~~~~~~~~~~~~~~ */
@@ -55,12 +64,14 @@ static void handle_default(int count, char **arglist)
     char *cmd = arglist[0];
     int status;
     pid_t pid = fork();
-    if (pid == -1) {
+    if (pid == FORK_FAILURE) {
+        perror("fork failure\n");
         /* Handle fork failure */
     }
     if (pid == 0)
     {
         execvp(cmd, arglist);
+        perror("execvp failure\n");
         /* If execvp returns, it must have failed */
     }
     else
@@ -81,12 +92,11 @@ int process_arglist(int count, char **arglist)
     int pi = pipe_index(count, arglist);
     int hr = has_right_redirection(count, arglist);
     int hl = has_left_redirection(count, arglist);
-
     if (ha)
     {
         /* code */
     }
-    else if (pi != -1)
+    else if (pi != NOT_FOUND)
     {
         /* code */
     }

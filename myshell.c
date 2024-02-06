@@ -96,9 +96,8 @@ static int has_left_redirection(int count, char **arglist)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-static int handle_default(int count, char **arglist)
+static int default_exec(int count, char **arglist)
 {
-    char *cmd = arglist[0];
     int status;
     pid_t pid = fork();
     if (pid == FORK_FAILURE) {
@@ -107,7 +106,7 @@ static int handle_default(int count, char **arglist)
     }
     if (pid == 0)
     {
-        execvp(cmd, arglist);
+        execvp(arglist[0], arglist);
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
@@ -118,18 +117,18 @@ static int handle_default(int count, char **arglist)
     return 1;
 }
 
-static int handle_ampersand(int count, char **arglist)
+static int exec_on_background(int count, char **arglist)
 {
-    char *cmd = arglist[0];
     pid_t pid;
     arglist[count - 1] = NULL;
     pid = fork();
     if (pid == FORK_FAILURE) {
-        /* Handle fork failure */
+        perror("fork failure");
+        return 0;
     }
     if (pid == 0)
     {
-        execvp(cmd, arglist);
+        execvp(arglist[0], arglist);
         /* If execvp returns, it must have failed */
     }
     num_of_sons++;
@@ -142,9 +141,8 @@ static int handle_ampersand(int count, char **arglist)
     return 1;
 }
 
-static int handle_input_redirection(int count, char **arglist)
+static int redirect_output(int count, char **arglist)
 {
-    char *cmd = arglist[0];
     char *file_name =  arglist[count - 1];
     pid_t pid;
     int status;
@@ -170,7 +168,45 @@ static int handle_input_redirection(int count, char **arglist)
             return 0;
         }
         close(file);
-        execvp(cmd, arglist);
+        execvp(arglist[0], arglist);
+        perror("execvp failure");
+        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+    }
+    if (waitpid(pid, &status, 0) == -1) {
+        perror("waitpid failure");
+        return 0;
+    }
+    return 1;
+}
+
+static int redirect_input(int count, char **arglist)
+{
+    char *file_name =  arglist[count - 1];
+    pid_t pid;
+    int status;
+    arglist[count - 2] = NULL;
+    pid = fork();
+
+    if (pid == FORK_FAILURE) {
+        perror("fork failure");
+        return 0;
+    }
+
+    if (pid == 0)
+    {
+        int file = open(file_name, O_RDONLY);
+        if (file < 0) {
+            perror("open file failure");
+            return 0;
+        }
+        int dup = dup2(file, STDIN_FILENO);
+        if (dup < 0) {
+            perror("dup2 failure");
+            close(file);
+            return 0;
+        }
+        close(file);
+        execvp(arglist[0], arglist);
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
@@ -187,10 +223,10 @@ int process_arglist(int count, char **arglist)
     int pi = pipe_index(count, arglist);
     int hr = has_right_redirection(count, arglist);
     int hl = has_left_redirection(count, arglist);
-    int ret_val;
+    int ret_val = 1; // TODO: remove when all cases aer finished
     if (ha)
     {
-        ret_val = handle_ampersand(count, arglist);
+        ret_val = exec_on_background(count, arglist);
     }
     else if (pi != NOT_FOUND)
     {
@@ -198,15 +234,15 @@ int process_arglist(int count, char **arglist)
     }
     else if (hr)
     {
-        ret_val = handle_input_redirection(count, arglist);
+        ret_val = redirect_output(count, arglist);
     }
     else if (hl)
     {
-        /* code */
+        ret_val = redirect_input(count, arglist);
     }
     else
     {
-        ret_val = handle_default(count, arglist);
+        ret_val = default_exec(count, arglist);
     }
 
     return ret_val;

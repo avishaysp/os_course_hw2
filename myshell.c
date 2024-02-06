@@ -9,9 +9,9 @@
 
 #define STREQ(a, b) (strcmp((a), (b)) == 0)
 #define FORK_FAILURE -1
+#define WAITPID_FAILURE -1
 #define NOT_FOUND -1
-#define DEBUG_PRINT(x) (printf("%d\n", x))
-#define DEBUG
+
 
 void mySignalHandler(int signum) { }
 static pid_t* sons;
@@ -43,9 +43,6 @@ int finalize(void)
 {
     int i;
     int status;
-    #ifdef DEBUG
-    printf("\nFinalize\n");
-    #endif
     for (i = 0; i < num_of_sons; i++)
     {
         if (sons[i] > 0) {
@@ -55,6 +52,14 @@ int finalize(void)
     free(sons);
     return 0;
 }
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~ Utilities ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -73,9 +78,7 @@ static int pipe_index(int count, char **arglist)
     for (i = 0; i < count; i++)
     {
         if (STREQ(arglist[i], "|"))
-        {
             return i;
-        }
     }
     return NOT_FOUND;
 }
@@ -110,7 +113,7 @@ static int default_exec(int count, char **arglist)
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    if (waitpid(pid, &status, 0) == -1) {
+    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
         perror("waitpid failure");
         return 0;
     }
@@ -172,7 +175,7 @@ static int redirect_output(int count, char **arglist)
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    if (waitpid(pid, &status, 0) == -1) {
+    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
         perror("waitpid failure");
         return 0;
     }
@@ -210,8 +213,66 @@ static int redirect_input(int count, char **arglist)
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    if (waitpid(pid, &status, 0) == -1) {
+    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
         perror("waitpid failure");
+        return 0;
+    }
+    return 1;
+}
+static int pipe_commands(int count, char **arglist, int pipe_index)
+{
+    char* cmd1 = arglist[0];
+    char* cmd2 = arglist[pipe_index + 1];
+    int pipefd[2];
+    int status;
+    arglist[pipe_index] = NULL;
+    pid_t pid = fork();
+    if (pid == FORK_FAILURE) {
+        perror("fork failure");
+        return 0;
+    }
+    if (pid == 0)
+    {
+        if (pipe(pipefd) == -1) {
+            perror("pipe failure");
+            exit(EXIT_FAILURE);
+        }
+        pid = fork();
+        if (pid == FORK_FAILURE) {
+            perror("fork failure");
+            exit(1);
+        }
+        if (pid == 0)
+        {
+            /* This is the process that will be execute the first command */
+            close(pipefd[0]); // read
+            int dup = dup2(pipefd[1], STDOUT_FILENO);
+            if (dup < 0) {
+                perror("dup2 failure in first command");
+                close(pipefd[1]);
+                exit(1);
+            }
+            close(pipefd[1]); // write
+            execvp(cmd1, arglist);
+            perror("execvp failure");
+            exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+        }
+
+        /* This is the process that will be execute the second command */
+        close(pipefd[1]); // write
+        int dup = dup2(pipefd[0], STDIN_FILENO);
+        if (dup < 0) {
+            perror("dup2 failure in second command");
+            close(pipefd[0]);
+            exit(1);
+        }
+        close(pipefd[0]); // read
+        execvp(cmd2, &arglist[pipe_index + 1]);
+        perror("execvp failure");
+        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+    }
+    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
+        perror("waitpid failure in shell");
         return 0;
     }
     return 1;
@@ -223,14 +284,14 @@ int process_arglist(int count, char **arglist)
     int pi = pipe_index(count, arglist);
     int hr = has_right_redirection(count, arglist);
     int hl = has_left_redirection(count, arglist);
-    int ret_val = 1; // TODO: remove when all cases aer finished
+    int ret_val;
     if (ha)
     {
         ret_val = exec_on_background(count, arglist);
     }
     else if (pi != NOT_FOUND)
     {
-        /* code */
+        ret_val = pipe_commands(count, arglist, pi);
     }
     else if (hr)
     {

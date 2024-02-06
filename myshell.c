@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <signal.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #define STREQ(a, b) (strcmp((a), (b)) == 0)
 #define FORK_FAILURE -1
@@ -124,6 +125,45 @@ static pid_t handle_ampersand(int count, char **arglist)
     return pid;
 }
 
+static void handle_input_redirection(int count, char **arglist)
+{
+    char *cmd = arglist[0];
+    char *file_name =  arglist[count - 1];
+    pid_t pid;
+    int status;
+    arglist[count - 2] = NULL;
+    pid = fork();
+    if (pid == FORK_FAILURE) {
+        perror("fork failure");
+        /* Handle fork failure */
+    }
+    if (pid == 0)
+    {
+        int file = open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (file < 0)
+        {
+            perror("open file failure");
+            /* Handle error */
+        }
+        int dup = dup2(file, STDOUT_FILENO);
+        if (dup < 0)
+        {
+            perror("dup2 failure");
+            close(file);
+            /* Handle error */
+        }
+        close(file);
+        execvp(cmd, arglist);
+        /* If execvp returns, it must have failed */
+        perror("execvp failure\n");
+    }
+    else
+    {
+        waitpid(pid, &status, 0);
+        /* Handle child status */
+    }
+}
+
 int process_arglist(int count, char **arglist)
 {
     int ha = has_ampersand(count, arglist);
@@ -151,7 +191,7 @@ int process_arglist(int count, char **arglist)
     }
     else if (hr)
     {
-        /* code */
+        handle_input_redirection(count, arglist);
     }
     else if (hl)
     {

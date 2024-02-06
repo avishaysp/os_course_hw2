@@ -1,5 +1,4 @@
 #include <stdlib.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -12,27 +11,28 @@
 #define FORK_FAILURE -1
 #define NOT_FOUND -1
 #define DEBUG_PRINT(x) (printf("%d\n", x))
+#define DEBUG
 
-void mySignalHandler(int signum) {printf("an't stop me\n");}
+void mySignalHandler(int signum) { }
 static pid_t* sons;
 static int num_of_sons;
 
 int prepare(void)
 {
-    struct sigaction sa = {.sa_handler = mySignalHandler};
+    struct sigaction sa = {.sa_handler = mySignalHandler, .sa_flags = SA_RESTART};
     if (sigaction(SIGINT, &sa, NULL) < 0) {
-        perror("Signal handle registration failed\n");
+        perror("Signal handle registration failed");
         return 1;
     }
     sons = (pid_t*)malloc(sizeof(pid_t));
     if (sons == NULL) {
-        printf("prepare malloc failed: %s\n", strerror(errno));
+        perror("prepare - malloc failed");
         return 1;
     }
     num_of_sons = 0;
     sons = (pid_t*)malloc(sizeof(pid_t));
     if (sons == NULL) {
-        printf("prepare malloc failed: %s\n", strerror(errno));
+        perror("prepare - malloc failed");
         return 1;
     }
     num_of_sons = 0;
@@ -43,7 +43,9 @@ int finalize(void)
 {
     int i;
     int status;
+    #ifdef DEBUG
     printf("\nFinalize\n");
+    #endif
     for (i = 0; i < num_of_sons; i++)
     {
         if (sons[i] > 0) {
@@ -54,7 +56,11 @@ int finalize(void)
     return 0;
 }
 
-/* ~~~~~~~~~~~~~~~~ Classification ~~~~~~~~~~~~~~~~ */
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~ Classification ~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
 
 static int has_ampersand(int count, char **arglist)
 {
@@ -84,31 +90,35 @@ static int has_left_redirection(int count, char **arglist)
     return count > 2 ? STREQ(arglist[count - 2], "<") : 0;
 }
 
-/* ~~~~~~~~~~~~~~~~~~~ Handling ~~~~~~~~~~~~~~~~~~~ */
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~ Handling ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
 
-static void handle_default(int count, char **arglist)
+static int handle_default(int count, char **arglist)
 {
     char *cmd = arglist[0];
     int status;
     pid_t pid = fork();
     if (pid == FORK_FAILURE) {
-        perror("fork failure\n");
-        /* Handle fork failure */
+        perror("fork failure");
+        return 0;
     }
     if (pid == 0)
     {
         execvp(cmd, arglist);
-        perror("execvp failure\n");
-        /* If execvp returns, it must have failed */
+        perror("execvp failure");
+        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    else
-    {
-        waitpid(pid, &status, 0);
-        /* Handle child status */
+    if (waitpid(pid, &status, 0) == -1) {
+        perror("waitpid failure");
+        return 0;
     }
+    return 1;
 }
 
-static pid_t handle_ampersand(int count, char **arglist)
+static int handle_ampersand(int count, char **arglist)
 {
     char *cmd = arglist[0];
     pid_t pid;
@@ -122,10 +132,17 @@ static pid_t handle_ampersand(int count, char **arglist)
         execvp(cmd, arglist);
         /* If execvp returns, it must have failed */
     }
-    return pid;
+    num_of_sons++;
+    sons = (pid_t*)realloc(sons, sizeof(pid_t) * num_of_sons);
+    if (sons == NULL) {
+        perror("sons realloc failed");
+        return 0;
+    }
+    sons[num_of_sons - 1] = pid;
+    return 1;
 }
 
-static void handle_input_redirection(int count, char **arglist)
+static int handle_input_redirection(int count, char **arglist)
 {
     char *cmd = arglist[0];
     char *file_name =  arglist[count - 1];
@@ -135,7 +152,7 @@ static void handle_input_redirection(int count, char **arglist)
     pid = fork();
     if (pid == FORK_FAILURE) {
         perror("fork failure");
-        /* Handle fork failure */
+        return 0;
     }
     if (pid == 0)
     {
@@ -143,25 +160,25 @@ static void handle_input_redirection(int count, char **arglist)
         if (file < 0)
         {
             perror("open file failure");
-            /* Handle error */
+            return 0;
         }
         int dup = dup2(file, STDOUT_FILENO);
         if (dup < 0)
         {
             perror("dup2 failure");
             close(file);
-            /* Handle error */
+            return 0;
         }
         close(file);
         execvp(cmd, arglist);
-        /* If execvp returns, it must have failed */
-        perror("execvp failure\n");
+        perror("execvp failure");
+        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    else
-    {
-        waitpid(pid, &status, 0);
-        /* Handle child status */
+    if (waitpid(pid, &status, 0) == -1) {
+        perror("waitpid failure");
+        return 0;
     }
+    return 1;
 }
 
 int process_arglist(int count, char **arglist)
@@ -170,20 +187,10 @@ int process_arglist(int count, char **arglist)
     int pi = pipe_index(count, arglist);
     int hr = has_right_redirection(count, arglist);
     int hl = has_left_redirection(count, arglist);
-    pid_t son;
-
+    int ret_val;
     if (ha)
     {
-        son = handle_ampersand(count, arglist);
-        printf("new son: %d\n", son);
-        num_of_sons++;
-        printf("num of sons: %d\n", num_of_sons);
-        sons = (pid_t*)realloc(sons, sizeof(pid_t) * num_of_sons);
-        if (sons == NULL) {
-            printf("sons realloc failed: %s\n", strerror(errno));
-            return 0;
-        }
-        sons[num_of_sons - 1] = son;
+        ret_val = handle_ampersand(count, arglist);
     }
     else if (pi != NOT_FOUND)
     {
@@ -191,7 +198,7 @@ int process_arglist(int count, char **arglist)
     }
     else if (hr)
     {
-        handle_input_redirection(count, arglist);
+        ret_val = handle_input_redirection(count, arglist);
     }
     else if (hl)
     {
@@ -199,8 +206,8 @@ int process_arglist(int count, char **arglist)
     }
     else
     {
-        handle_default(count, arglist);
+        ret_val = handle_default(count, arglist);
     }
 
-    return 1;
+    return ret_val;
 }

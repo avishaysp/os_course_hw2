@@ -13,13 +13,13 @@
 #define NOT_FOUND -1
 
 
-void mySignalHandler(int signum) { }
+void shell_signal_handler(int signum) { }
 static pid_t* sons;
 static int num_of_sons;
 
 int prepare(void)
 {
-    struct sigaction sa = {.sa_handler = mySignalHandler, .sa_flags = SA_RESTART};
+    struct sigaction sa = {.sa_handler = shell_signal_handler, .sa_flags = SA_RESTART};
     if (sigaction(SIGINT, &sa, NULL) < 0) {
         perror("Signal handle registration failed");
         return 1;
@@ -30,14 +30,9 @@ int prepare(void)
         return 1;
     }
     num_of_sons = 0;
-    sons = (pid_t*)malloc(sizeof(pid_t));
-    if (sons == NULL) {
-        perror("prepare - malloc failed");
-        return 1;
-    }
-    num_of_sons = 0;
     return 0;
 }
+
 
 int finalize(void)
 {
@@ -59,7 +54,15 @@ int finalize(void)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-
+static int waitpid_w_error_handling(pid_t pid)
+{
+    int status;
+    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
+        perror("waitpid failure");
+        return 0;
+    }
+    return 1;
+}
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -101,7 +104,6 @@ static int has_left_redirection(int count, char **arglist)
 
 static int default_exec(int count, char **arglist)
 {
-    int status;
     pid_t pid = fork();
     if (pid == FORK_FAILURE) {
         perror("fork failure");
@@ -113,11 +115,7 @@ static int default_exec(int count, char **arglist)
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
-        perror("waitpid failure");
-        return 0;
-    }
-    return 1;
+    return waitpid_w_error_handling(pid);
 }
 
 static int exec_on_background(int count, char **arglist)
@@ -131,13 +129,18 @@ static int exec_on_background(int count, char **arglist)
     }
     if (pid == 0)
     {
+        if (setpgid(0, 0) == -1) { // set new process group for background process
+            perror("Failed to set new process group for background process");
+            exit(1);
+        }
         execvp(arglist[0], arglist);
-        /* If execvp returns, it must have failed */
+        perror("execvp failure");
+        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
     num_of_sons++;
     sons = (pid_t*)realloc(sons, sizeof(pid_t) * num_of_sons);
     if (sons == NULL) {
-        perror("sons realloc failed");
+        perror("sons realloc failed. Hance I can't keep track of all current sons");
         return 0;
     }
     sons[num_of_sons - 1] = pid;
@@ -148,7 +151,6 @@ static int redirect_output(int count, char **arglist)
 {
     char *file_name =  arglist[count - 1];
     pid_t pid;
-    int status;
     arglist[count - 2] = NULL;
     pid = fork();
     if (pid == FORK_FAILURE) {
@@ -161,32 +163,27 @@ static int redirect_output(int count, char **arglist)
         if (file < 0)
         {
             perror("open file failure");
-            return 0;
+            exit(1);
         }
         int dup = dup2(file, STDOUT_FILENO);
         if (dup < 0)
         {
             perror("dup2 failure");
             close(file);
-            return 0;
+            exit(1);
         }
         close(file);
         execvp(arglist[0], arglist);
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
-        perror("waitpid failure");
-        return 0;
-    }
-    return 1;
+   return waitpid_w_error_handling(pid);
 }
 
 static int redirect_input(int count, char **arglist)
 {
     char *file_name =  arglist[count - 1];
     pid_t pid;
-    int status;
     arglist[count - 2] = NULL;
     pid = fork();
 
@@ -200,65 +197,40 @@ static int redirect_input(int count, char **arglist)
         int file = open(file_name, O_RDONLY);
         if (file < 0) {
             perror("open file failure");
-            return 0;
+            exit(1);
         }
         int dup = dup2(file, STDIN_FILENO);
         if (dup < 0) {
             perror("dup2 failure");
             close(file);
-            return 0;
+            exit(1);
         }
         close(file);
         execvp(arglist[0], arglist);
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
-        perror("waitpid failure");
-        return 0;
-    }
-    return 1;
+    return waitpid_w_error_handling(pid);
 }
 static int pipe_commands(int count, char **arglist, int pipe_index)
 {
     char* cmd1 = arglist[0];
     char* cmd2 = arglist[pipe_index + 1];
     int pipefd[2];
-    int status;
     arglist[pipe_index] = NULL;
-    pid_t pid = fork();
-    if (pid == FORK_FAILURE) {
+
+    if (pipe(pipefd) == -1) {
+        perror("pipe failure");
+        return 0;
+    }
+    pid_t pid0 = fork();
+    if (pid0 == FORK_FAILURE) {
         perror("fork failure");
         return 0;
     }
-    if (pid == 0)
+    if (pid0 == 0)
     {
-        if (pipe(pipefd) == -1) {
-            perror("pipe failure");
-            exit(EXIT_FAILURE);
-        }
-        pid = fork();
-        if (pid == FORK_FAILURE) {
-            perror("fork failure");
-            exit(1);
-        }
-        if (pid == 0)
-        {
-            /* This is the process that will be execute the first command */
-            close(pipefd[0]); // read
-            int dup = dup2(pipefd[1], STDOUT_FILENO);
-            if (dup < 0) {
-                perror("dup2 failure in first command");
-                close(pipefd[1]);
-                exit(1);
-            }
-            close(pipefd[1]); // write
-            execvp(cmd1, arglist);
-            perror("execvp failure");
-            exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
-        }
-
-        /* This is the process that will be execute the second command */
+        /* This is the process that will execute the second command */
         close(pipefd[1]); // write
         int dup = dup2(pipefd[0], STDIN_FILENO);
         if (dup < 0) {
@@ -271,11 +243,32 @@ static int pipe_commands(int count, char **arglist, int pipe_index)
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
-    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
-        perror("waitpid failure in shell");
-        return 0;
+
+    pid_t pid1 = fork();
+    if (pid1 == FORK_FAILURE) {
+        perror("fork failure");
+        exit(1);
     }
-    return 1;
+    if (pid1 == 0)
+    {
+        /* This is the process that will execute the first command */
+        close(pipefd[0]); // read
+        int dup = dup2(pipefd[1], STDOUT_FILENO);
+        if (dup < 0) {
+            perror("dup2 failure in first command");
+            close(pipefd[1]);
+            exit(1);
+        }
+        close(pipefd[1]); // write
+        execvp(cmd1, arglist);
+        perror("execvp failure");
+        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+    }
+    close(pipefd[0]);
+    close(pipefd[1]);
+    int res0 = waitpid_w_error_handling(pid0);
+    int res1 = waitpid_w_error_handling(pid1);
+    return res0 || res1;
 }
 
 int process_arglist(int count, char **arglist)

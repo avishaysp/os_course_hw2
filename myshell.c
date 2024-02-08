@@ -12,39 +12,54 @@
 #define WAITPID_FAILURE -1
 #define NOT_FOUND -1
 
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~ Signal Handlers ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
 
-void shell_signal_handler(int signum) { }
-static pid_t* sons;
-static int num_of_sons;
+void sigchld_handler(int signum) {
+    if (signum == SIGCHLD) {
+        int status;
+        pid_t pid;
+        while ((pid = waitpid(-1, &status, WNOHANG)) > 0) { }
+        // Check if waitpid returned due to an error
+        if (pid == WAITPID_FAILURE && errno != ECHILD) // ECHILD means no more child processes
+            perror("waitpid failure");
+    }
+}
+
+void sigint_handler(int signum) { }
+
 
 int prepare(void)
 {
-    struct sigaction sa = {.sa_handler = shell_signal_handler, .sa_flags = SA_RESTART};
-    if (sigaction(SIGINT, &sa, NULL) < 0) {
-        perror("Signal handle registration failed");
+    struct sigaction sa_chld, sa_int;
+
+    // SIGCHLD
+    sigemptyset(&sa_chld.sa_mask);
+    sa_chld.sa_handler = sigchld_handler;
+    sa_chld.sa_flags = SA_NOCLDSTOP | SA_RESTART;
+    if (sigaction(SIGCHLD, &sa_chld, NULL) < 0) {
+        perror("SIGCHLD handle registration failed");
         return 1;
     }
-    sons = (pid_t*)malloc(sizeof(pid_t));
-    if (sons == NULL) {
-        perror("prepare - malloc failed");
+
+    // SIGINT
+    sigemptyset(&sa_int.sa_mask);
+    sa_int.sa_handler = sigint_handler;
+    sa_int.sa_flags = SA_RESTART;
+    if (sigaction(SIGINT, &sa_int, NULL) < 0) {
+        perror("SIGINT handle registration failed");
         return 1;
     }
-    num_of_sons = 0;
+
     return 0;
 }
 
 
 int finalize(void)
 {
-    int i;
-    int status;
-    for (i = 0; i < num_of_sons; i++)
-    {
-        if (sons[i] > 0) {
-            waitpid(sons[i], &status, 0);
-        }
-    }
-    free(sons);
     return 0;
 }
 
@@ -57,11 +72,18 @@ int finalize(void)
 static int waitpid_w_error_handling(pid_t pid)
 {
     int status;
-    if (waitpid(pid, &status, 0) == WAITPID_FAILURE) {
+    if (waitpid(pid, &status, 0) == WAITPID_FAILURE && errno != ECHILD) {
         perror("waitpid failure");
         return 0;
     }
     return 1;
+}
+
+static void execvp_w_error_handling(char *cmd1, char **arglist)
+{
+    execvp(cmd1, arglist);
+    perror("execvp failure");
+    exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
 }
 
 /*
@@ -111,7 +133,7 @@ static int default_exec(int count, char **arglist)
     }
     if (pid == 0)
     {
-        execvp(arglist[0], arglist);
+        execvp_w_error_handling(arglist[0], arglist);
         perror("execvp failure");
         exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
@@ -133,17 +155,8 @@ static int exec_on_background(int count, char **arglist)
             perror("Failed to set new process group for background process");
             exit(1);
         }
-        execvp(arglist[0], arglist);
-        perror("execvp failure");
-        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+        execvp_w_error_handling(arglist[0], arglist);
     }
-    num_of_sons++;
-    sons = (pid_t*)realloc(sons, sizeof(pid_t) * num_of_sons);
-    if (sons == NULL) {
-        perror("sons realloc failed. Hance I can't keep track of all current sons");
-        return 0;
-    }
-    sons[num_of_sons - 1] = pid;
     return 1;
 }
 
@@ -173,9 +186,7 @@ static int redirect_output(int count, char **arglist)
             exit(1);
         }
         close(file);
-        execvp(arglist[0], arglist);
-        perror("execvp failure");
-        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+        execvp_w_error_handling(arglist[0], arglist);
     }
    return waitpid_w_error_handling(pid);
 }
@@ -206,12 +217,11 @@ static int redirect_input(int count, char **arglist)
             exit(1);
         }
         close(file);
-        execvp(arglist[0], arglist);
-        perror("execvp failure");
-        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+        execvp_w_error_handling(arglist[0], arglist);
     }
     return waitpid_w_error_handling(pid);
 }
+
 static int pipe_commands(int count, char **arglist, int pipe_index)
 {
     char* cmd1 = arglist[0];
@@ -239,9 +249,7 @@ static int pipe_commands(int count, char **arglist, int pipe_index)
             exit(1);
         }
         close(pipefd[0]); // read
-        execvp(cmd2, &arglist[pipe_index + 1]);
-        perror("execvp failure");
-        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+        execvp_w_error_handling(cmd2, &arglist[pipe_index + 1]);
     }
 
     pid_t pid1 = fork();
@@ -260,9 +268,7 @@ static int pipe_commands(int count, char **arglist, int pipe_index)
             exit(1);
         }
         close(pipefd[1]); // write
-        execvp(cmd1, arglist);
-        perror("execvp failure");
-        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+        execvp_w_error_handling(cmd1, arglist);
     }
     close(pipefd[0]);
     close(pipefd[1]);

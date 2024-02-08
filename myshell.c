@@ -79,11 +79,11 @@ static int waitpid_w_error_handling(pid_t pid)
     return 1;
 }
 
-static void execvp_w_error_handling(char *cmd1, char **arglist)
+static void execvp_w_error_handling(char *cmd, char **arglist)
 {
-    execvp(cmd1, arglist);
+    execvp(cmd, arglist);
     perror("execvp failure");
-    exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
+    exit(1); // In cases of child failure I certainly don't want the child to return to shell.c
 }
 
 /*
@@ -131,11 +131,9 @@ static int default_exec(int count, char **arglist)
         perror("fork failure");
         return 0;
     }
-    if (pid == 0)
+    if (pid == 0)  // Son
     {
         execvp_w_error_handling(arglist[0], arglist);
-        perror("execvp failure");
-        exit(1); /* In cases of child failure I certainly don't want the child to return to shell.c */
     }
     return waitpid_w_error_handling(pid);
 }
@@ -143,15 +141,15 @@ static int default_exec(int count, char **arglist)
 static int exec_on_background(int count, char **arglist)
 {
     pid_t pid;
-    arglist[count - 1] = NULL;
+    arglist[count - 1] = NULL; // Discard backgraund symbol as arg
     pid = fork();
     if (pid == FORK_FAILURE) {
         perror("fork failure");
         return 0;
     }
-    if (pid == 0)
+    if (pid == 0)  // Son
     {
-        if (setpgid(0, 0) == -1) { // set new process group for background process
+        if (setpgid(0, 0) == -1) { // avoid killing background processes on SIGINT
             perror("Failed to set new process group for background process");
             exit(1);
         }
@@ -164,15 +162,15 @@ static int redirect_output(int count, char **arglist)
 {
     char *file_name =  arglist[count - 1];
     pid_t pid;
-    arglist[count - 2] = NULL;
+    arglist[count - 2] = NULL; // Discard redirection symbol and file name as args
     pid = fork();
     if (pid == FORK_FAILURE) {
         perror("fork failure");
         return 0;
     }
-    if (pid == 0)
+    if (pid == 0)  // Son
     {
-        int file = open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        int file = open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644); // Write, Create if new, overwrite if exists
         if (file < 0)
         {
             perror("open file failure");
@@ -195,7 +193,7 @@ static int redirect_input(int count, char **arglist)
 {
     char *file_name =  arglist[count - 1];
     pid_t pid;
-    arglist[count - 2] = NULL;
+    arglist[count - 2] = NULL;  // Discard redirection symbol and file name as args
     pid = fork();
 
     if (pid == FORK_FAILURE) {
@@ -203,9 +201,9 @@ static int redirect_input(int count, char **arglist)
         return 0;
     }
 
-    if (pid == 0)
+    if (pid == 0) // Son
     {
-        int file = open(file_name, O_RDONLY);
+        int file = open(file_name, O_RDONLY); // Read
         if (file < 0) {
             perror("open file failure");
             exit(1);
@@ -224,10 +222,10 @@ static int redirect_input(int count, char **arglist)
 
 static int pipe_commands(int count, char **arglist, int pipe_index)
 {
-    char* cmd1 = arglist[0];
-    char* cmd2 = arglist[pipe_index + 1];
+    char* cmd0 = arglist[0];
+    char* cmd1 = arglist[pipe_index + 1];
     int pipefd[2];
-    arglist[pipe_index] = NULL;
+    arglist[pipe_index] = NULL;  // So cmd0 will stop before cmd1
 
     if (pipe(pipefd) == -1) {
         perror("pipe failure");
@@ -238,7 +236,7 @@ static int pipe_commands(int count, char **arglist, int pipe_index)
         perror("fork failure");
         return 0;
     }
-    if (pid0 == 0)
+    if (pid0 == 0) // Son
     {
         /* This is the process that will execute the second command */
         close(pipefd[1]); // write
@@ -249,7 +247,7 @@ static int pipe_commands(int count, char **arglist, int pipe_index)
             exit(1);
         }
         close(pipefd[0]); // read
-        execvp_w_error_handling(cmd2, &arglist[pipe_index + 1]);
+        execvp_w_error_handling(cmd1, &arglist[pipe_index + 1]);
     }
 
     pid_t pid1 = fork();
@@ -257,7 +255,7 @@ static int pipe_commands(int count, char **arglist, int pipe_index)
         perror("fork failure");
         exit(1);
     }
-    if (pid1 == 0)
+    if (pid1 == 0)  // Son
     {
         /* This is the process that will execute the first command */
         close(pipefd[0]); // read
@@ -268,10 +266,11 @@ static int pipe_commands(int count, char **arglist, int pipe_index)
             exit(1);
         }
         close(pipefd[1]); // write
-        execvp_w_error_handling(cmd1, arglist);
+        execvp_w_error_handling(cmd0, arglist);
     }
-    close(pipefd[0]);
-    close(pipefd[1]);
+    close(pipefd[0]); // read
+    close(pipefd[1]); // write
+    // Wait for both sons
     int res0 = waitpid_w_error_handling(pid0);
     int res1 = waitpid_w_error_handling(pid1);
     return res0 || res1;
@@ -304,6 +303,5 @@ int process_arglist(int count, char **arglist)
     {
         ret_val = default_exec(count, arglist);
     }
-
     return ret_val;
 }

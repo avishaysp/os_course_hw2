@@ -34,6 +34,7 @@ void sigint_handler(int signum) { }
 
 int prepare(void)
 {
+    printf(" >> ");
     struct sigaction sa_chld, sa_int;
 
     // SIGCHLD
@@ -283,6 +284,7 @@ int process_arglist(int count, char **arglist)
     int hr = has_right_redirection(count, arglist);
     int hl = has_left_redirection(count, arglist);
     int ret_val;
+    printf(" >> ");
     if (ha)
     {
         ret_val = exec_on_background(count, arglist);
